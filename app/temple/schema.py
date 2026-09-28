@@ -199,6 +199,150 @@ CREATE TABLE IF NOT EXISTS restoration_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_restoration_events_resource ON restoration_events(resource_type,resource_id,id);
+CREATE TABLE IF NOT EXISTS special_funds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    temple_id INTEGER NOT NULL REFERENCES temple_sites(id),
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    total_amount REAL NOT NULL CHECK(total_amount >= 0),
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS procurement_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    temple_id INTEGER NOT NULL REFERENCES temple_sites(id),
+    restoration_campaign_id INTEGER REFERENCES restoration_campaigns(id),
+    fund_id INTEGER NOT NULL REFERENCES special_funds(id),
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    scope_summary TEXT NOT NULL DEFAULT '',
+    budget_cap REAL NOT NULL CHECK(budget_cap >= 0),
+    committed_amount REAL NOT NULL DEFAULT 0 CHECK(committed_amount >= 0),
+    state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','frozen','closed','cancelled')),
+    required_signoffs_json TEXT NOT NULL DEFAULT '[]',
+    current_version_no INTEGER NOT NULL DEFAULT 0,
+    frozen_by TEXT,
+    frozen_at TEXT,
+    closed_at TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_temple ON procurement_packages(temple_id,state);
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_campaign ON procurement_packages(restoration_campaign_id);
+CREATE TABLE IF NOT EXISTS procurement_change_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id),
+    code TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','pending','effective','rejected','withdrawn')),
+    revision_no INTEGER NOT NULL,
+    resubmits_change_order_id INTEGER REFERENCES procurement_change_orders(id),
+    budget_delta REAL NOT NULL DEFAULT 0,
+    reserved_amount REAL NOT NULL DEFAULT 0 CHECK(reserved_amount >= 0),
+    fund_commitment_id INTEGER,
+    effective_version_no INTEGER,
+    decision_note TEXT NOT NULL DEFAULT '',
+    submitted_by TEXT,
+    submitted_at TEXT,
+    decided_by TEXT,
+    decided_at TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_change_orders_package ON procurement_change_orders(package_id,state,id);
+CREATE TABLE IF NOT EXISTS procurement_change_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    change_order_id INTEGER NOT NULL REFERENCES procurement_change_orders(id) ON DELETE CASCADE,
+    line_no INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('add','increase','decrease','substitute')),
+    material_code TEXT NOT NULL,
+    material_name TEXT NOT NULL DEFAULT '',
+    material_spec TEXT NOT NULL DEFAULT '',
+    material_unit TEXT NOT NULL DEFAULT '',
+    material_unit_price REAL NOT NULL DEFAULT 0 CHECK(material_unit_price >= 0),
+    quantity REAL NOT NULL CHECK(quantity > 0),
+    substitute_code TEXT,
+    substitute_name TEXT,
+    substitute_spec TEXT,
+    substitute_unit TEXT,
+    substitute_unit_price REAL,
+    reason TEXT NOT NULL,
+    impact TEXT NOT NULL,
+    UNIQUE(change_order_id,line_no)
+);
+CREATE TABLE IF NOT EXISTS procurement_package_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    version_no INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'effective' CHECK(state IN ('effective','superseded')),
+    source_change_order_id INTEGER REFERENCES procurement_change_orders(id),
+    manifest_json TEXT NOT NULL,
+    total_amount REAL NOT NULL CHECK(total_amount >= 0),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    superseded_at TEXT,
+    UNIQUE(package_id,version_no)
+);
+CREATE INDEX IF NOT EXISTS idx_package_versions_state ON procurement_package_versions(package_id,state);
+CREATE TABLE IF NOT EXISTS procurement_material_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    material_code TEXT NOT NULL,
+    material_name TEXT NOT NULL,
+    material_spec TEXT NOT NULL DEFAULT '',
+    material_unit TEXT NOT NULL DEFAULT '',
+    quantity REAL NOT NULL CHECK(quantity >= 0),
+    unit_price REAL NOT NULL CHECK(unit_price >= 0),
+    accepted_qty REAL NOT NULL DEFAULT 0 CHECK(accepted_qty >= 0),
+    introduced_version_no INTEGER NOT NULL DEFAULT 0,
+    introduced_change_order_id INTEGER REFERENCES procurement_change_orders(id),
+    last_change_version_no INTEGER NOT NULL DEFAULT 0,
+    last_change_change_order_id INTEGER REFERENCES procurement_change_orders(id),
+    substituted_by_change_order_id INTEGER REFERENCES procurement_change_orders(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(package_id,material_code)
+);
+CREATE TABLE IF NOT EXISTS procurement_signoffs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    change_order_id INTEGER REFERENCES procurement_change_orders(id) ON DELETE CASCADE,
+    signer_role TEXT NOT NULL,
+    signer TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    signed_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signoffs_freeze ON procurement_signoffs(package_id,signer_role) WHERE change_order_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signoffs_change_order ON procurement_signoffs(change_order_id,signer_role) WHERE change_order_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS fund_commitments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_id INTEGER NOT NULL REFERENCES special_funds(id),
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id),
+    change_order_id INTEGER REFERENCES procurement_change_orders(id),
+    amount REAL NOT NULL CHECK(amount >= 0),
+    state TEXT NOT NULL DEFAULT 'held' CHECK(state IN ('held','released')),
+    reason TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    released_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fund_commitments_fund ON fund_commitments(fund_id,state);
+CREATE INDEX IF NOT EXISTS idx_fund_commitments_package ON fund_commitments(package_id,state);
+CREATE TABLE IF NOT EXISTS procurement_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id),
+    material_code TEXT NOT NULL,
+    quantity REAL NOT NULL CHECK(quantity > 0),
+    actor TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    received_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_receipts_package ON procurement_receipts(package_id,id);
 '''
 
 
