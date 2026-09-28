@@ -199,6 +199,134 @@ CREATE TABLE IF NOT EXISTS restoration_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_restoration_events_resource ON restoration_events(resource_type,resource_id,id);
+CREATE TABLE IF NOT EXISTS procurement_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    temple_id INTEGER NOT NULL REFERENCES temple_sites(id),
+    restoration_campaign_id INTEGER REFERENCES restoration_campaigns(id),
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    budget_limit REAL NOT NULL CHECK(budget_limit >= 0),
+    required_signatures_json TEXT NOT NULL DEFAULT '[]',
+    state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','frozen','closed','cancelled')),
+    frozen_at TEXT,
+    frozen_by TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_temple ON procurement_packages(temple_id,state);
+CREATE TABLE IF NOT EXISTS procurement_materials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    material_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    spec TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(package_id, material_code)
+);
+CREATE TABLE IF NOT EXISTS procurement_package_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    version_no INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','active','superseded')),
+    budget_total REAL NOT NULL CHECK(budget_total >= 0),
+    change_order_id INTEGER,
+    activated_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(package_id, version_no)
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_versions_state ON procurement_package_versions(package_id,state);
+CREATE TABLE IF NOT EXISTS procurement_package_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    package_version_id INTEGER NOT NULL REFERENCES procurement_package_versions(id) ON DELETE CASCADE,
+    material_id INTEGER NOT NULL REFERENCES procurement_materials(id),
+    material_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    spec TEXT NOT NULL DEFAULT '',
+    quantity REAL NOT NULL CHECK(quantity >= 0),
+    unit_price REAL NOT NULL CHECK(unit_price >= 0),
+    line_amount REAL NOT NULL CHECK(line_amount >= 0),
+    line_kind TEXT NOT NULL DEFAULT 'line' CHECK(line_kind IN ('line','addition','removal','substitution','adjustment')),
+    predecessor_line_id INTEGER REFERENCES procurement_package_lines(id),
+    change_order_id INTEGER,
+    UNIQUE(package_version_id, material_id)
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_lines_material ON procurement_package_lines(material_id,id);
+CREATE TABLE IF NOT EXISTS procurement_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id),
+    material_id INTEGER NOT NULL REFERENCES procurement_materials(id),
+    material_code TEXT NOT NULL,
+    quantity REAL NOT NULL CHECK(quantity > 0),
+    unit_price REAL NOT NULL CHECK(unit_price >= 0),
+    source_version_id INTEGER REFERENCES procurement_package_versions(id),
+    source_line_id INTEGER REFERENCES procurement_package_lines(id),
+    reference TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_procurement_receipts_material ON procurement_receipts(package_id,material_id,id);
+CREATE TABLE IF NOT EXISTS change_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id),
+    code TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    impact TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','submitted','rejected','withdrawn','effective')),
+    base_version_id INTEGER NOT NULL REFERENCES procurement_package_versions(id),
+    effective_version_id INTEGER REFERENCES procurement_package_versions(id),
+    revision_of_id INTEGER REFERENCES change_orders(id),
+    revision_seq INTEGER NOT NULL DEFAULT 1,
+    fund_reference TEXT NOT NULL DEFAULT '',
+    committed_fund_amount REAL NOT NULL DEFAULT 0 CHECK(committed_fund_amount >= 0),
+    net_delta_amount REAL NOT NULL DEFAULT 0,
+    decision_note TEXT NOT NULL DEFAULT '',
+    submitted_at TEXT,
+    decided_by TEXT,
+    decided_at TEXT,
+    effective_at TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_change_orders_package_state ON change_orders(package_id,state,id);
+CREATE INDEX IF NOT EXISTS idx_change_orders_revision ON change_orders(revision_of_id);
+CREATE TABLE IF NOT EXISTS change_order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    change_order_id INTEGER NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+    item_seq INTEGER NOT NULL,
+    change_kind TEXT NOT NULL CHECK(change_kind IN ('addition','removal','substitution','adjustment')),
+    material_code TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    unit TEXT NOT NULL DEFAULT '',
+    spec TEXT NOT NULL DEFAULT '',
+    quantity REAL NOT NULL DEFAULT 0,
+    unit_price REAL NOT NULL DEFAULT 0,
+    quantity_delta REAL NOT NULL DEFAULT 0,
+    new_unit_price REAL,
+    target_material_code TEXT NOT NULL DEFAULT '',
+    target_name TEXT NOT NULL DEFAULT '',
+    target_unit TEXT NOT NULL DEFAULT '',
+    target_spec TEXT NOT NULL DEFAULT '',
+    target_quantity REAL NOT NULL DEFAULT 0,
+    target_unit_price REAL NOT NULL DEFAULT 0,
+    line_delta_amount REAL NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    UNIQUE(change_order_id, item_seq)
+);
+CREATE TABLE IF NOT EXISTS change_order_signatures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    change_order_id INTEGER NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+    signer_role TEXT NOT NULL,
+    signer TEXT NOT NULL,
+    signed_at TEXT NOT NULL,
+    UNIQUE(change_order_id, signer_role)
+);
 '''
 
 

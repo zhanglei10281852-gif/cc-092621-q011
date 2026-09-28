@@ -17,6 +17,9 @@ class TempleRestorationService:
         ensure_temple_schema(self.connection)
         self.clock = clock or SystemClock()
         self.repository = TempleRepository(self.connection)
+        from app.temple.procurement import ProcurementService
+
+        self.procurement = ProcurementService(self.connection, self.clock)
 
     def create_restoration_campaign(self, payload: dict[str, Any]) -> dict[str, Any]:
         temple = self._temple(payload["temple_code"])
@@ -61,6 +64,7 @@ class TempleRestorationService:
             (restoration_campaign_id,),
         ).fetchall()]
         result["events"] = self._events(connection, "restoration_campaign", restoration_campaign_id)
+        result["procurement"] = self.procurement.campaign_procurement_summary(restoration_campaign_id, connection)
         return result
 
     def list_restoration_campaigns(self, temple_code: str | None = None, state: str | None = None) -> list[dict[str, Any]]:
